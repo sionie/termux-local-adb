@@ -59,11 +59,46 @@ promote_to_5555() {
 
 probe_ports() {
   local host="$1"
-  # Prefer Nmap's native TCP connect scanner when available. The original
-  # Python scanner is retained for installations without nmap.
+  # Wireless Debugging advertises its TLS connect port over DNS-SD.
+  # Prefer this to scanning thousands of mostly closed ports.
+  if python -c 'import zeroconf' >/dev/null 2>&1; then
+    local mdns_candidates
+    mdns_candidates="$(python - "$PROBE_SECONDS" <<'PYMDNS'
+import sys, time
+from zeroconf import Zeroconf, ServiceBrowser, ServiceListener
+
+class Listener(ServiceListener):
+    def __init__(self, zc):
+        self.zc = zc
+        self.ports = set()
+    def add_service(self, zc, service_type, name):
+        info = zc.get_service_info(service_type, name, timeout=1500)
+        if info and info.port and info.port not in self.ports:
+            self.ports.add(info.port)
+            print(info.port, flush=True)
+    def update_service(self, zc, service_type, name):
+        self.add_service(zc, service_type, name)
+    def remove_service(self, zc, service_type, name):
+        pass
+
+zc = Zeroconf()
+listener = Listener(zc)
+browser = ServiceBrowser(zc, "_adb-tls-connect._tcp.local.", listener)
+try:
+    time.sleep(min(8, float(sys.argv[1])))
+finally:
+    browser.cancel()
+    zc.close()
+PYMDNS
+)"
+    if [ -n "$mdns_candidates" ]; then
+      printf "%s\n" "$mdns_candidates"
+      return 0
+    fi
+    # Empty DNS-SD results fall back to port scanning.
+  fi
   if command -v nmap >/dev/null 2>&1; then
-    nmap -sT -Pn -n --open --max-retries 0 \
-      --host-timeout "${PROBE_SECONDS}s" \
+    nmap -sT -Pn -n --open --max-retries 0 --host-timeout "60s" \
       -p "${START_PORT}-${END_PORT}" -oG - "$host" 2>/dev/null |
       awk '/Ports:/ {
         n=split($0, pieces, "Ports: ");
