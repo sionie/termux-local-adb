@@ -28,12 +28,24 @@ The script first checks whether `127.0.0.1:5555` is already alive, so normal rec
 Install the Termux dependencies:
 
 ```sh
-pkg install android-tools python
+pkg install git android-tools python
 # Optional fallback scanner (device performance varies):
 pkg install nmap
 # Optional DNS-SD discovery, preferred when Wireless Debugging advertises a service:
 python -m pip install zeroconf
 ```
+
+## First-time ADB pairing (required after Termux reset)
+
+**A new Termux installation or cleared Termux app data creates a new ADB authentication key.** Before expecting automatic recovery, pair Termux with Android Wireless Debugging **once**. Turning on Wireless Debugging alone is not sufficient. Pairing should normally survive reboots as long as the Termux ADB keys and Android's paired-device authorization are retained.
+
+1. On the Android device, enable **Developer options → Wireless debugging**. In **Pair device with pairing code**, note the shown IP:pairing-port and the temporary pairing code.
+2. In **Termux on the same device**, run `adb pair DEVICE_IP:PAIRING_PORT` and enter the displayed code when prompted. Or supply the code as the second argument for a non-interactive invocation; avoid writing it to logs or scripts.
+3. Verify the command reports `Successfully paired`. The **pairing port** is temporary and is **not** the separate **IP address & port** shown on the main Wireless Debugging screen.
+4. With Wireless Debugging still enabled, run `~/bin/restore-local-adb.sh`. It discovers the current TLS connect endpoint, authenticates using the paired key, and promotes it to `127.0.0.1:5555`. Confirm with `adb devices`.
+5. On later reboots, Tasker can enable Wireless Debugging while Termux:Boot invokes the recovery script; normal reboots do **not** require re-pairing. Repeat pairing if the Termux ADB keys or Android paired-device entry are lost.
+
+Do not paste pairing codes or private keys into issues or commit them. Keep Android's ADB authorization enabled.
 
 ## Install
 
@@ -44,9 +56,11 @@ git clone https://github.com/sionie/termux-local-adb.git
 cd termux-local-adb
 mkdir -p ~/bin ~/.termux/boot
 cp restore-local-adb.sh ~/bin/restore-local-adb.sh
-cp boot/adb-autostart.sh ~/.termux/boot/adb-autostart.sh
-chmod 700 ~/bin/restore-local-adb.sh ~/.termux/boot/adb-autostart.sh
+cp boot/adb-autostart.sh ~/.termux/boot/20-adb-autostart
+chmod 700 ~/bin/restore-local-adb.sh ~/.termux/boot/20-adb-autostart
 ```
+
+**Open the Termux:Boot app at least once after installation.** Android will not necessarily deliver boot events to an app that has never been launched. Ensure that battery/background restrictions do not prevent Termux:Boot or Tasker from running. To also start SSH after reboot, install `openssh` and create an executable `~/.termux/boot/00-sshd` containing a shebang and `sshd`. SSH is independent of the local ADB restore.
 
 If you use the included Tasker `Restore adb` task with Termux:Tasker, place a real wrapper or copy in `~/.termux/tasker/`; do not rely on a symlink that resolves outside that directory unless `allow-external-apps=true` is configured.
 
@@ -66,9 +80,22 @@ This can be useful for a private VPN/Tailscale address when loopback discovery a
 
 ## Tasker project
 
-`tasker/Boot.prj.xml` is the tested Tasker export. Its `On Boot` task waits for Android to settle, launches Termux, and sets the global `adb_wifi_enabled` value twice. The separate `Restore adb` task enables Wireless Debugging and invokes the Termux:Tasker restore action.
+Import `tasker/Boot.prj.xml` as a **Tasker project** (in Tasker, long-press a project tab, then Import Project). The included tasks retain the names **On Boot** and **Restore adb**. Do not enable duplicate On Boot profiles from older imported projects.
 
-Whether the Tasker bootstrap is necessary depends on the device/ROM. Once `127.0.0.1:5555` has been established, the tested device kept local ADB alive when Wi-Fi was disabled.
+The `On Boot` profile responds to Android boot, waits **30 seconds** (check that Tasker displays *30 Seconds*, not hours), launches Termux, then waits five more seconds. It issues the Custom Setting write `adb_wifi_enabled = 1` up to **12 times** with **5-second waits** between attempts, to tolerate a slow boot. This version deliberately uses repeated simple actions rather than a Tasker loop whose imported XML had failed on the test device. It does **not** inspect the state between writes or stop early. No Tailscale action is included.
+
+The `Restore adb` task is optional and contains a Termux:Tasker action. If you want to use that task, install Termux:Tasker, configure its Android permissions and Termux external-app access as required, and ensure the referenced `restore-local-adb.sh` is actually available from the Termux:Tasker scripts directory. The **Termux:Boot script works without Termux:Tasker**.
+
+On some Android ROMs, changing the `adb_wifi_enabled` global setting needs additional Tasker permission, such as WRITE_SECURE_SETTINGS granted by a trusted ADB session. A profile being enabled does not prove the setting was applied: after a reboot, check that Wireless Debugging really turns on and inspect Tasker Run Log if not.
+
+**Verified on Galaxy Tab Active 3 (SM-T575N, Android 13), 2026-10-24:** after initial pairing, the imported fixed `On Boot` Tasker workflow enabled Wireless Debugging, Termux:Boot launched the recovery script, and the script discovered a changing TLS port without a manually entered port. It produced `127.0.0.1:5555 device` after reboot. This is one real-device validation, not a guarantee for every Android build.
+
+### Troubleshooting
+
+- `adb devices` empty while Wireless Debugging is on: **first confirm pairing**. Try `adb pair IP:PAIRING_PORT` with a fresh code if Termux was reset.
+- Log says `ERROR no verified ADB endpoint`: distinguish Wireless Debugging being off, unpaired keys, and port discovery failure. The pairing port is different from the connection port.
+- SSH port 8022 unavailable after reboot: configure Termux:Boot to run `sshd`; Tasker does not automatically start SSH.
+- After changing Tasker XML: re-import as a project and disable the old boot profile so two profiles do not race.
 
 ## Security warning
 
