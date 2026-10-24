@@ -7,7 +7,7 @@ CACHE="${CACHE:-$HOME/.cache/termux-local-adb/adb-serial}"
 LOG="${LOG:-$HOME/.cache/termux-local-adb/restore.log}"
 START_PORT="${START_PORT:-30000}"
 END_PORT="${END_PORT:-49999}"
-PROBE_SECONDS="${PROBE_SECONDS:-10}"
+PROBE_SECONDS="${PROBE_SECONDS:-35}"
 DISCOVERY_HOSTS="${ADB_DISCOVERY_HOSTS:-127.0.0.1}"
 TARGET_SERIAL="127.0.0.1:5555"
 
@@ -59,6 +59,23 @@ promote_to_5555() {
 
 probe_ports() {
   local host="$1"
+  # Prefer Nmap's native TCP connect scanner when available. The original
+  # Python scanner is retained for installations without nmap.
+  if command -v nmap >/dev/null 2>&1; then
+    nmap -sT -Pn -n --open --max-retries 0 \
+      --host-timeout "${PROBE_SECONDS}s" \
+      -p "${START_PORT}-${END_PORT}" -oG - "$host" 2>/dev/null |
+      awk '/Ports:/ {
+        n=split($0, pieces, "Ports: ");
+        if (n<2) next;
+        m=split(pieces[2], ports, ",");
+        for (i=1; i<=m; i++) {
+          split(ports[i], fields, "/");
+          if (fields[2]=="open") print fields[1];
+        }
+      }'
+    return
+  fi
   python - "$host" "$START_PORT" "$END_PORT" "$PROBE_SECONDS" <<'PY'
 import errno
 import select
