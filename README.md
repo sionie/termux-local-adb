@@ -13,7 +13,7 @@ This project bootstraps Android's dynamic Wireless Debugging endpoint from Termu
 5. Stale dynamic transports are removed.
 6. Optional phantom-process mitigation settings are reapplied.
 
-The script first checks whether `127.0.0.1:5555` is already alive, so normal recovery is fast. Dynamic port probing is only used for bootstrap/recovery. If `nmap` is installed, the script uses its native TCP connect scanner before falling back to the original Python scanner.
+The script first checks whether `127.0.0.1:5555` is already alive, so normal recovery is fast. Dynamic port probing is only used for bootstrap/recovery. If `zeroconf` is installed, the script first looks for the `_adb-tls-connect._tcp.local.` DNS-SD service advertised by Wireless Debugging. If no service is found, it tries `nmap` (if installed), then the original Python scanner.
 
 ## Requirements
 
@@ -29,8 +29,10 @@ Install the Termux dependencies:
 
 ```sh
 pkg install android-tools python
-# Recommended on slower Android tablets for faster native TCP port discovery:
+# Optional fallback scanner (device performance varies):
 pkg install nmap
+# Optional DNS-SD discovery, preferred when Wireless Debugging advertises a service:
+python -m pip install zeroconf
 ```
 
 ## Install
@@ -50,7 +52,7 @@ If you use the included Tasker `Restore adb` task with Termux:Tasker, place a re
 
 ## Discovery behavior
 
-The default discovery range is TCP 30000-49999, with a 35-second per-host probe budget. On resource-constrained Android tablets, the old Python-only probe can fail to reach the live port before its deadline. Installing `nmap` enables an alternative TCP connect scan without hardcoding a per-boot port. A successful existing `127.0.0.1:5555` connection still bypasses all discovery. **A full cold-boot recovery must be verified on each target device**; success after a previously established ADB connection does not prove discovery works on reboot.
+The default discovery range is TCP 30000-49999, with a 35-second per-host probe budget. On resource-constrained Android tablets, the old Python-only probe can fail to reach the live port before its deadline. `nmap` provides an alternative connect scan, but on the tested Tab Active 3 its full-range scan could still exceed one minute. DNS-SD is preferred when available. A successful existing `127.0.0.1:5555` connection still bypasses all discovery. **A full cold-boot recovery must be verified on each target device**; success after a previously established ADB connection does not prove discovery works on reboot.
 
 ## Discovery hosts
 
